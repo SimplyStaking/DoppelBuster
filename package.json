@@ -1,0 +1,30 @@
+{
+  "name": "doppelganger-checker",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://repo.simply-vc.com.mt/staking/doppelganger-checker.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "assert": "^2.0.0",
+    "axios": "^1.4.0",
+    "body-parser": "^1.20.2",
+    "ethereumjs-util": "^7.1.5",
+    "express": "^4.18.2",
+    "fs": "^0.0.1-security",
+    "logger": "^0.0.1",
+    "prom-client": "^14.2.0",
+    "sqlite": "^4.2.0",
+    "sqlite3": "^5.1.6",
+    "url": "^0.11.0",
+    "winston": "^3.8.2"
+  }
+}

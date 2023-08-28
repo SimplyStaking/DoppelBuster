@@ -1,0 +1,14 @@
+version: '3.3'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/doppelganger-checker/data
+      - ./config:/doppelganger-checker/config
+      - ./validators:/doppelganger-checker/validators
+    ports:
+      - 3000:3000
+      - 3001:3001
