@@ -8,7 +8,7 @@ import {
 import { logger } from "./helpers/logger.js";
 import { readValidatorList } from "./helpers/utils.js";
 import { getAttestationsForSlots, getBlockRoot, getCurrentJustifiedEpoch, getLatestEpoch, getSlotAttestationsBits, getValidatorDuties, getValidatorsIndexes } from "./helpers/beacon-api.js";
-import { getValidator } from "./helpers/db.js";
+import { getValidator, getValidatorsInGroup } from "./helpers/db.js";
 import { Config } from "./helpers/config.js";
 import { MonitorMetrics } from "./helpers/monitor-metrics.js";
 
@@ -44,29 +44,67 @@ export const startBridge = (PORT, metrics) => {
       try {
         // Read list of validators
         validators = readValidatorList(filename)
+
       }
       catch (err) {
-        logger.error("Could not get validator list file", err)
+        logger.error("Could not get validator list", err)
         logger.info("Start validator for " + filename+": false");
         return res.status(500).json({"error": err.message, start: false})
       }
 
       // Get validator indexes
       let indexes = await getValidatorsIndexes(validators);
+      
+      try {
+        // Loop through validators to ensure they exist and are part of this group
+        for (let index of indexes){
+          // Get the validator
+          await getValidator(index, filename);
+        }
+      }
+      catch (err) {
+        msg = `Could not get validator, it might be running on another client already`
+        logger.error(msg)
+        logger.info("Start validator for " + filename+": false");
+        return res.status(500).json({"error": msg, start: false})
+      }
+
       // Get latest epoch
       let epoch = await getLatestEpoch();
-      // Set last attested to epoch -2
-      let lastAttested = epoch-2;
+
+      // Set epoch in which it is considered safe to start
+      // This is set to N + 3
+      // Consider it is the second slot of epoch 9 and the validator is restarted. If the validator attested in the 
+      // first slot then you can’t use epoch 9 for DG protection anymore. 
+      // Therefore, you must use epoch 10 as your DG protection epoch
+      let safeEpoch = epoch + 3
+      // Check if validators are in a doppelganger check
+      let validatorsInGroup = await getValidatorsInGroup(filename)
+      let alreadyInCheck = validatorsInGroup.length > 0 && validatorsInGroup[0].in_doppelganger
+      let epochToCheck = 0
+      // If already in doppelganger check, use the epoch in which the check was started to find the safe epoch
+      if (alreadyInCheck){
+        epochToCheck = validatorsInGroup[0].check_started
+        safeEpoch = epochToCheck + 3
+
+        // If current epoch is less than safe epoch, return false
+        if(epoch < safeEpoch){
+          let msg = `Current epoch ${epoch} is less than safe epoch ${safeEpoch}`
+          logger.error(msg)
+          logger.info("Start validator for " + filename+": false");
+          return res.status(500).json({"error": msg, start: false})
+        }
+      }
 
       // Create epoch list to iterate
-      let epochs = [epoch-1, epoch];
+      let epochs = [epochToCheck, epochToCheck+1, epochToCheck+2];
 
       // This holds a flag whether an attestation was found
-      let foundAttestation = [false, false];
+      let foundAttestation = [false, false, false];
       // This holds a flag whether an attestation was actually found
       let foundNonErroredAttestation = false;
       // This holds an array of validators where a confirmed missed attestation was found
-      let foundMissedAttestationVals = [[],[]];
+      let foundMissedAttestationVals = [[],[],[]];
       // This is a flag which is set to true if a validator is found to have actually missed attestations on two epochs
       let foundMissedAttestation = false;
       // This holds a flag whether the group is already in a doppelganger 
@@ -75,6 +113,16 @@ export const startBridge = (PORT, metrics) => {
       // Check for all 404s
       let counter404 = 0
       let counterReq = 0
+
+      // If the first check and not currently in the doppelganger check
+      if (!alreadyInCheck){
+        await updateTable("validators", {"in_doppelganger": true, "check_started": epoch, "enabled_epoch": epoch + config.config.vc_doppelganger_epochs_down + 2}, "val_group", filename)
+        logger.info("Start validator for " + filename+": false");
+        metrics.updateMetricsValidator(filename.split(".")[0], true)
+        return res.status(500).json({"error": "Not enough epochs passed", start: false})
+      }
+
+    
 
       // Loop through epochs
       for (let j = 0; j < epochs.length; j++){
@@ -132,7 +180,7 @@ export const startBridge = (PORT, metrics) => {
                   }
                   else{
                     foundMissedAttestationVals[j].push(valIndex);
-                    if (foundMissedAttestationVals[0].includes(valIndex) && foundMissedAttestationVals[1].includes(valIndex)){
+                    if (foundMissedAttestationVals[0].includes(valIndex) || foundMissedAttestationVals[1].includes(valIndex) || foundMissedAttestationVals[2].includes(valIndex)){
                       foundMissedAttestation = true
                     }
                   }
@@ -147,7 +195,6 @@ export const startBridge = (PORT, metrics) => {
             
             // If attested, set lastAttested epoch and foundAttestation to true
             if (attested) {
-              lastAttested = ep
               foundAttestation[j] = true
             }
             
@@ -163,16 +210,18 @@ export const startBridge = (PORT, metrics) => {
     // Start if we did not found an actual attestation and the first epoch was missed or if no actual attestations were found but missed attestations were found
     let percentage404 = Number(counter404)/Number(counterReq)
     logger.info(`Percentage of 404ed requests ${percentage404}`)
-    let toStart = ((!foundNonErroredAttestation && !foundAttestation[0]) || (!foundNonErroredAttestation && foundMissedAttestation)) && (percentage404 <= 0.45)
-    // if group not in doppelganger
-    if (!groupInDoppelganger){
-      await updateTable("validators", {"in_doppelganger": true, "enabled_epoch": lastAttested + config.config.vc_doppelganger_epochs_down + 2}, "val_group", filename)
-      metrics.updateMetricsValidator(filename.split(".")[0], true)
-    }
+    logger.info(`foundNonErroredAttestation: ${foundNonErroredAttestation}`)
+    logger.info(`foundAttestation: ${foundAttestation}`)
+    logger.info(`foundMissedAttestation: ${foundMissedAttestation}`)
+    let toStart = ((!foundNonErroredAttestation && !foundAttestation) || (!foundNonErroredAttestation && foundMissedAttestation)) && (percentage404 <= 0.3)
 
     // If to start validator client
     if (toStart) {
       await updateTable("validators", {"started_vc": true}, "val_group", filename)
+    }
+    else{
+      await updateTable("validators", {"in_doppelganger": true, "check_started": epoch, "enabled_epoch": epoch + config.config.vc_doppelganger_epochs_down + 2}, "val_group", filename)
+      metrics.updateMetricsValidator(filename.split(".")[0], true)
     }
 
     logger.info("Start validator for " + filename+" :" + toStart);
@@ -208,4 +257,3 @@ const startMetricsServer = (metrics) => {
 
   server.listen(config.config.metrics_port);
 };
-

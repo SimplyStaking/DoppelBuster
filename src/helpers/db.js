@@ -68,6 +68,22 @@ export const getValidatorsInDoppelganger = async () => {
 };
 
 /**
+ * Function to get all validators of a group from the DB
+ * @param {string} valGroup the group of the validator
+ * @returns {object[]} array of validators in DB
+ * @returns {number} returns[].val_index The validator index
+ * @returns {string} returns[].val_group The name of the validator group
+ * @returns {number} returns[].enabled_epoch The epoch when to be enabled
+ * @returns {bool} returns[].in_doppelganger Whether the validator is in doppelganger
+ * @returns {bool} returns[].started_vc Whether the validator client was already started
+ */
+export const getValidatorsInGroup = async (valGroup) => {
+  await loadDB();
+
+  return await db.all(`SELECT * FROM validators where val_group="${valGroup}"`);
+};
+
+/**
  * Function to get a validator from the DB
  * @param {number} validator the index of the validator
  * @param {string} valGroup the group of the validator

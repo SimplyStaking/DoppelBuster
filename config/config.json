@@ -3,5 +3,5 @@
     "metrics_port": 3001,
     "beacon_url": "http://127.0.0.1:3500",
     "db_path": "./data/database.db",
-    "vc_doppelganger_epochs_down": 2
+    "vc_doppelganger_epochs_down": 3
 }
