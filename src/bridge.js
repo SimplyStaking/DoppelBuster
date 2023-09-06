@@ -97,14 +97,21 @@ export const startBridge = (PORT, metrics) => {
       }
 
       // Create epoch list to iterate
-      let epochs = [epochToCheck, epochToCheck+1, epochToCheck+2];
-
+      let epochs = [];
       // This holds a flag whether an attestation was found
-      let foundAttestation = [false, false, false];
+      let foundAttestation = [];
+      // This holds an array of validators where a confirmed missed attestation was found
+      let foundMissedAttestationVals = [];
+
+      // Create epoch list to iterate
+      for (let i = epochToCheck; i <= epoch; i++){
+        epochs.push(i)
+        foundAttestation.push(false)
+        foundMissedAttestationVals.push([])
+      }
+
       // This holds a flag whether an attestation was actually found
       let foundNonErroredAttestation = false;
-      // This holds an array of validators where a confirmed missed attestation was found
-      let foundMissedAttestationVals = [[],[],[]];
       // This is a flag which is set to true if a validator is found to have actually missed attestations on two epochs
       let foundMissedAttestation = false;
       // This holds a flag whether the group is already in a doppelganger 
@@ -121,8 +128,6 @@ export const startBridge = (PORT, metrics) => {
         metrics.updateMetricsValidator(filename.split(".")[0], true)
         return res.status(500).json({"error": "Not enough epochs passed", start: false})
       }
-
-    
 
       // Loop through epochs
       for (let j = 0; j < epochs.length; j++){
@@ -218,10 +223,6 @@ export const startBridge = (PORT, metrics) => {
     // If to start validator client
     if (toStart) {
       await updateTable("validators", {"started_vc": true}, "val_group", filename)
-    }
-    else{
-      await updateTable("validators", {"in_doppelganger": true, "check_started": epoch, "enabled_epoch": epoch + config.config.vc_doppelganger_epochs_down + 2}, "val_group", filename)
-      metrics.updateMetricsValidator(filename.split(".")[0], true)
     }
 
     logger.info("Start validator for " + filename+" :" + toStart);
